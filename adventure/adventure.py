@@ -1,4 +1,4 @@
-import os
+import random
 import requests
 import json
 from azure.identity import DefaultAzureCredential
@@ -110,15 +110,30 @@ action_schema = {
         "DC": {
             "type": "integer"
         },
-        "type": {
+        "skill": {
+            "type": "string"
+        },
+        "ability": {
+            "type": "string"
+        },
+        "why_needed": {
+            "type": "string"
+        },
+        "how_much_needed": {
+            "type": "integer"
+        },
+        "repeats_previous_action": {
+            "type": "boolean"
+        },
+        "previous_action_result": {
             "type": "string"
         }
     },
-    "required": ["DC", "type"],
+    "required": ["DC", "skill", "ability", "why_needed", "how_much_needed", "repeats_previous_action", "previous_action_result"],
     "additionalProperties": False
 }
 
-def make_structured_request(system_prompt: str, prompt: str, schema: dict, max_tokens: int, conversation_context: list = [], temperature: float=0.7, top_p: float=0.95) -> dict:
+def make_structured_request(system_prompt: str, user_prompt: str, second_system_prompt: str, schema: dict, max_tokens: int, conversation_context: list = [], temperature: float=0.7, top_p: float=0.95) -> dict:
     headers = {
         "Content-Type": "application/json",
         "api-key": api_key,
@@ -150,6 +165,7 @@ def make_structured_request(system_prompt: str, prompt: str, schema: dict, max_t
         "max_tokens": max_tokens
     }
 
+    # Add conversation context
     for context_entry in conversation_context:
         payload['messages'].append({
             'role': 'user',
@@ -169,12 +185,26 @@ def make_structured_request(system_prompt: str, prompt: str, schema: dict, max_t
                 }
             ]
         })
+
+    # Add a second system prompt if provided
+    if second_system_prompt:
+        payload['messages'].append({
+            'role': 'system',
+            'content': [
+                {
+                    'type': 'text',
+                    'text': second_system_prompt
+                }
+            ]
+        })
+
+    # Finally the user's prompt
     payload['messages'].append({
         "role": "user",
         "content": [
             {
             "type": "text",
-            "text": prompt
+            "text": user_prompt
             }
         ]
     })
@@ -234,21 +264,17 @@ A change in the player's health, either from taking damage or from healing.
 A change in the player's location from moving around.
 '''
 
-difficulty_class_rules = '''
+action_rules = '''
 The user is playing a fantasy role-playing game set in a typical medieval sword-and-sorcery RPG setting and you are the Dungeon Master.
-When the user types a requrest you are to determine what type of action it is and also compute a Difficulty Class, which is a numerical
-score indicating the task's difficulty following the rules of D&D 5th Edition.
+When the user types a requrest you are to determine what type of action it is, determine the skill that should be checked when executing the action,
+the ability that skill is based on, and compute a Difficulty Class, which is a numerical score indicating the task's difficulty.
+Also describe why this skill is needed for this particular action and give a rating for how much the skill is needed, on a scale of 1 (barely needed) to 5 (essential).
 
+Skills, Ability, and Difficulty Class should be computed following the rules of D&D 5th Edition.
+Note: if the player is attempting to repeat a previous action or perform an action very similar to one previously used, don't set a DC.  Instead make sure that the
+action has the same outcome as the previous attempt.  Examples include trying to intimidate or persuade the same characters multiple times or trying to pick the same lock twice.
+Exception: stealth actions like following someone require a new check each turn.
 
-Choose a type of action from the following list:
-Movement
-Combat
-Searching
-Evading
-Deciphering messages
-Talking with people
-Picking locks
-Disarming traps
 '''
 
 game_state = {
@@ -267,28 +293,95 @@ game_state = {
 }
 
 
+character = {
+    "Strength": (16,3),
+    "Dexterity": (14,2),
+    "Constitution": (15,2),
+    "Intelligence": (9,-1),
+    "Wisdom": (11,0),
+    "Charisma": (13,1),
+    "skills": {
+        "Athletics": 5,
+        "Acrobatics": 4,
+        "Sleight of Hand": 2,
+        "Stealth": 2,
+        "Arcana": -1,
+        "History": -1,
+        "Investigation": -1,
+        "Nature": -1,
+        "Religion": -1,
+        "Animal Handling": 0,
+        "Insight": 0,
+        "Medicine": 0,
+        "Perception": 2,
+        "Survival": 0,
+        "Deception": 1,
+        "Intimidation": 3,
+        "Performance": 1,
+        "Persuasion": 3
+    }
+}
+
+skill_feature_dict = {
+    'Athletics': 'physical feats of strength and endurance, such as climbing, swimming, and jumping',
+    'Acrobatics': 'balance, agility, and performing acrobatic stunts. Includes trying to move across narrow surfaces',
+    'Sleight of Hand': 'manual dexterity and subtlety, such as picking pockets, picking locks, concealing objects, or performing quick-handed tricks',
+    'Stealth': 'remaining unseen or unheard, sneaking past guards, hiding in shadows, or moving silently',
+    'Arcana': 'knowledge of magical lore, spells, and magical items, identifying spells, understanding magical effects, or recognizing arcane symbols',
+    'History': 'knowledge of past events, cultures, battles, and legends',
+    'Investigation': 'finding clues, solving puzzles, deducing information from evidence, searching for hidden objects',
+    'Nature': 'knowledge of the natural world, including flora, fauna, weather, and natural phenomena, identifying plants, animals, and natural hazards',
+    'Religion': 'knowledge of deities, religious traditions, sacred rites, and divine symbols',
+    'Animal Handling': 'interacting with animals, calming them, or training them',
+    'Insight': 'understanding the motives, feelings, or intentions of others, determining if someone is lying, gauging their emotional state, or sensing their true intentions',
+    'Medicine': 'medical knowledge and the ability to heal or diagnose',
+    'Perception': 'using your senses to notice hidden things, spot danger, or detect changes in the environment, noticing traps, hidden enemies, or environmental hazards',
+    'Survival': 'outdoor skills like tracking, foraging, navigating, and enduring harsh conditions, finding food, navigating through the wilderness, and avoiding natural hazards',
+    'Deception': 'convincing others of a falsehood, lying, or disguising your true intentions, bluffing, lying, or misleading others in various situations',
+    'Intimidation': 'using threats, physical presence, or forceful language to influence others',
+    'Performance': 'entertaining others through music, dance, acting, or storytelling',
+    'Persuasion': 'using diplomacy, charm, or social grace to influence others, negotiating, bargaining, convincing, or winning someone over in a non-threatening manner'
+}
+
+
 context = []
 
 
 def turn(command: str) -> str:
     global game_state
     global context
-    #action = make_structured_request(difficulty_class_rules + json.dumps(game_state, indent=4), command, action_schema, 5000, context)
-    result = make_structured_request(game_rules + json.dumps(game_state, indent=4), command, game_schema, 5000, context)
+
+    # First determine what sort of checks (if any) need to be made on the coming action
+    action_response = make_structured_request(action_rules + json.dumps(game_state, indent=4), command, None, action_schema, 5000, context)
+    action = json.loads(action_response['message']['content'])
+    success_message = ''
+    if action['DC'] > 0 and action['how_much_needed'] > 2:
+        die_roll = random.randint(1, 20)
+        skill = action['skill']
+        modifier = character['skills'].get(skill, 0)
+        skill_features = skill_feature_dict.get(skill, skill)
+        modifier_text = ''
+        if action['how_much_needed'] == 3:
+            modifier_text = 'though it should only matter a bit'
+        elif action['how_much_needed'] == 5:
+            modifier_text = 'and it should matter a lot'
+        if die_roll + modifier >= action['DC']:
+            success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it succeeds {modifier_text}'
+        else:
+            success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it fails {modifier_text}.'
+    print(action)
+    print(success_message)
+
+    # Perform the action
+    result = make_structured_request(game_rules + json.dumps(game_state, indent=4), command, success_message, game_schema, 5000, context)
     content = result['message']['content']
     structured_content = json.loads(content)
     response = structured_content['response']
-    new_state_response = make_structured_request(state_change_rules + json.dumps(game_state, indent=4), response, game_state_schema, 2000, [])
-    #new_state = structured_content['game_state']
-    #state_change = structured_content['state_change']
+    new_state_response = make_structured_request(state_change_rules + json.dumps(game_state, indent=4), response, None, game_state_schema, 2000, [])
     new_state = json.loads(new_state_response['message']['content'])
-    context.append(('(past) ' + command, '(past) ' + response))
-    #apply_state_change(game_state, state_change)
+    context.append((success_message + '\n' + command, response))
     game_state = new_state
-    #game_state['exits'] = new_state['exits']
-    #print(action['message']['content'])
     print(response)
-    #print(state_change)
     print(game_state)
 
 
