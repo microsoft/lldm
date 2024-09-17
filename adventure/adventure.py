@@ -23,7 +23,7 @@ ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/
 api_key = ''
 
 # Define the game schema (JSON Schema).  This defines the structured state of the game.
-game_state = {
+game_state_schema = {
     "type": "object",
     "properties": {
         "health": {
@@ -66,7 +66,7 @@ game_state = {
 }
 
 # Schema for state changes
-state_change = {
+state_change_schema = {
     "type": "object",
     "properties": {
         "add_gold": {
@@ -98,14 +98,27 @@ game_schema = {
         "response": {
             "type": "string"
         },
-        "game_state": game_state,
-        "state_change": state_change
+        "game_state": game_state_schema,
     },
-    "required": ["response", "game_state", "state_change"],
+    "required": ["response", "game_state"],
     "additionalProperties": False
 }
 
-def make_structured_request(system_prompt: str, prompt: str, max_tokens: int, conversation_context: list = [], temperature: float=0.7, top_p: float=0.95) -> dict:
+action_schema = {
+    "type": "object",
+    "properties": {
+        "DC": {
+            "type": "integer"
+        },
+        "type": {
+            "type": "string"
+        }
+    },
+    "required": ["DC", "type"],
+    "additionalProperties": False
+}
+
+def make_structured_request(system_prompt: str, prompt: str, schema: dict, max_tokens: int, conversation_context: list = [], temperature: float=0.7, top_p: float=0.95) -> dict:
     headers = {
         "Content-Type": "application/json",
         "api-key": api_key,
@@ -128,7 +141,7 @@ def make_structured_request(system_prompt: str, prompt: str, max_tokens: int, co
             "type": "json_schema",
             "json_schema": {
                 "name": "game_response",
-                "schema": game_schema,
+                "schema": schema,
                 "strict": True
             }
         },
@@ -209,7 +222,33 @@ Do not change the inventory without notifying the player in your response.
 Location is the current location of the player
 Direction specifiers like North, South, Up, etc specify the locations the player may reach by moving in a direction
 
-After the user's turn, give a text response explaining what happened output the new game state, and describe how the game state changed.
+After the user's turn, give a text response explaining in detail what happened.
+'''
+
+state_change_rules = '''
+The user is playing a fantasy role-playing game set in a typical medieval sword-and-sorcery RPG setting and you are the Dungeon Master.
+The user is a player in the game.
+Examine the given action description and determine how the game state has changed.  Possible stage changes:
+A change in the player's gold, either from spending gold to buy something, losing gold, or obtaining new gold.  Simply discussing gold, looking at prices, or bargaining does not change the player's gold.
+A change in the player's health, either from taking damage or from healing.
+A change in the player's location from moving around.
+'''
+
+difficulty_class_rules = '''
+The user is playing a fantasy role-playing game set in a typical medieval sword-and-sorcery RPG setting and you are the Dungeon Master.
+When the user types a requrest you are to determine what type of action it is and also compute a Difficulty Class, which is a numerical
+score indicating the task's difficulty following the rules of D&D 5th Edition.
+
+
+Choose a type of action from the following list:
+Movement
+Combat
+Searching
+Evading
+Deciphering messages
+Talking with people
+Picking locks
+Disarming traps
 '''
 
 game_state = {
@@ -234,16 +273,22 @@ context = []
 def turn(command: str) -> str:
     global game_state
     global context
-    result = make_structured_request(game_rules + json.dumps(game_state, indent=4), command, 5000, context)
+    #action = make_structured_request(difficulty_class_rules + json.dumps(game_state, indent=4), command, action_schema, 5000, context)
+    result = make_structured_request(game_rules + json.dumps(game_state, indent=4), command, game_schema, 5000, context)
     content = result['message']['content']
     structured_content = json.loads(content)
     response = structured_content['response']
-    new_state = structured_content['game_state']
-    state_change = structured_content['state_change']
-    context.append((command, response))
-    apply_state_change(game_state, state_change)
+    new_state_response = make_structured_request(state_change_rules + json.dumps(game_state, indent=4), response, game_state_schema, 2000, [])
+    #new_state = structured_content['game_state']
+    #state_change = structured_content['state_change']
+    new_state = json.loads(new_state_response['message']['content'])
+    context.append(('(past) ' + command, '(past) ' + response))
+    #apply_state_change(game_state, state_change)
+    game_state = new_state
+    #game_state['exits'] = new_state['exits']
+    #print(action['message']['content'])
     print(response)
-    print(state_change)
+    #print(state_change)
     print(game_state)
 
 
