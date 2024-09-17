@@ -22,6 +22,33 @@ def get_api_key():
 ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-15-preview"
 api_key = ''
 
+# Combat schema.  Includes all information needed to manage combat
+combat_schema = {
+    "type": "object",
+    "properties": {
+        "in_combat": {
+            "type": "boolean"
+        },
+        "surprise": {
+            "type": "boolean"
+        },
+        "monster_AC": {
+            "type": "integer"
+        },
+        "monster_attack_bonus": {
+            "type": "integer"
+        },
+        "monster_health": {
+            "type": "integer"
+        },
+        "monster_dexterity": {
+            "type": "integer"
+        }
+    },
+    "required": ["in_combat", "surprise", "monster_AC", "monster_attack_bonus", "monster_health", "monster_dexterity"],
+    "additionalProperties": False
+}
+
 # Define the game schema (JSON Schema).  This defines the structured state of the game.
 game_state_schema = {
     "type": "object",
@@ -37,6 +64,12 @@ game_state_schema = {
             "items": {
                 "type": "string"
             }
+        },
+        "AC": {
+            "type": "integer"
+        },
+        "attack_bonus": {
+            "type": "integer"
         },
         "location": {
             "type": "string"
@@ -59,36 +92,10 @@ game_state_schema = {
             },
             "required": ["north", "south", "east", "west"],
             "additionalProperties": False
-        }
+        },
+        "combat": combat_schema
     },
-    "required": ["health", "gold", "inventory", "location", "exits"],
-    "additionalProperties": False
-}
-
-# Schema for state changes
-state_change_schema = {
-    "type": "object",
-    "properties": {
-        "add_gold": {
-            "type": "integer"
-        },
-        "add_inventory": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
-        "remove_inventory": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
-        "set_location": {
-            "type": "string"
-        }
-    },
-    "required": ["add_gold", "add_inventory", "remove_inventory", "set_location"],
+    "required": ["health", "gold", "AC", "attack_bonus", "inventory", "location", "exits", "combat"],
     "additionalProperties": False
 }
 
@@ -243,25 +250,29 @@ where the player ends up.  You are to stay in character as the DM and not reveal
 The player may move around by going in one of the four cardinal directions or by specifying a visible location.
 The player may interact with objects and characters, enter combat, pick up and manipulate items, check their inventory, and check their health.
 The player may ask basic questions about the game but you must only reveal what they know or can see.
-
-Also update the following game state as needed.
-Health is an integer value from 0 (death) to 10 (full health)
-Gold is an integer that represents the number of gold pieces the player carries.  Do not let the player spend more gold then they have!
-Inventory is a list of items that the player carries.  When the player picks up an item add it to the inventory.  When a player uses up an item or drop it then remove it from the inventory.
-Do not change the inventory without notifying the player in your response.
-Location is the current location of the player
-Direction specifiers like North, South, Up, etc specify the locations the player may reach by moving in a direction
-
 After the user's turn, give a text response explaining in detail what happened.
 '''
 
 state_change_rules = '''
 The user is playing a fantasy role-playing game set in a typical medieval sword-and-sorcery RPG setting and you are the Dungeon Master.
 The user is a player in the game.
-Examine the given action description and determine how the game state has changed.  Possible stage changes:
-A change in the player's gold, either from spending gold to buy something, losing gold, or obtaining new gold.  Simply discussing gold, looking at prices, or bargaining does not change the player's gold.
-A change in the player's health, either from taking damage or from healing.
-A change in the player's location from moving around.
+Examine the given action description and determine how the game state has changed, generating the new game state.
+Game State includes the following:
+Health is an integer value from 0 (death) to 10 (full health)
+Gold is an integer that represents the number of gold pieces the player carries.  Do not let the player spend more gold then they have!
+Inventory is a list of items that the player carries.  When the player picks up an item add it to the inventory.  When a player uses up an item or drop it then remove it from the inventory.
+AC is the player's armor class, based on their best equipped armor and following D&D 5th Edition rules.
+Attack Bonus is the bonus modifier of the player's best equipped weapon following D&D 5th Edition rules.
+Combat provides information about whether or not the player is in combat and the state of the combat if one is in progress.  It includes:
+in_combat should be True if the player is engaged in active combat or there are monsters close enough to attack.
+surprise should be True if the monsters are unaware of the player's presence, or False if the player is out in the open or the monsters have been alerted.
+monster_AC is the overall averaged Armor Class of the monsters, following D&D 5th Edition rules.
+monster_attack_bonus is the overall monster attack modifier, following D&D 5th Edition rules and taking into account the general level of the monsters.
+monster_health represents the health of the monsters, on a scale of 0 (death) to 10 (full health).
+monster_dexterity represents the monster dexterity ability score from D&D 5th Edition, on a scale of 3 (lowest) through 18 (highest).  This includes how fast the monsters can move and react.
+Do not change the inventory without notifying the player in your response.
+Location is the current location of the player
+Direction specifiers like North, South, Up, etc specify the locations the player may reach by moving in a direction
 '''
 
 action_rules = '''
@@ -270,24 +281,23 @@ When the user types a requrest you are to determine what type of action it is, d
 the ability that skill is based on, and compute a Difficulty Class, which is a numerical score indicating the task's difficulty.
 Also describe why this skill is needed for this particular action and give a rating for how much the skill is needed, on a scale of 1 (barely needed) to 5 (essential).
 
-Skills, Ability, and Difficulty Class should be computed following the rules of D&D 5th Edition.
-Note: if the player is attempting to repeat a previous action or perform an action very similar to one previously used, don't set a DC.  Instead make sure that the
-action has the same outcome as the previous attempt.  Examples include trying to intimidate or persuade the same characters multiple times or trying to pick the same lock twice.
-Exception: stealth actions like following someone require a new check each turn.
-
+Skills, Ability, and Difficulty Class should be computed following the rules of D&D 5th Edition.  If the action is a combat Attack Roll then the Difficulty Class should be set to the
+averaged Armor Class of the monsters the player faces.
 '''
 
 game_state = {
     "health": 10,
     "gold": 20,
     "inventory": [
-        "Wooden sword"
+        "Longsword",
+        "Chainmail",
+        "Sturdy shield"
     ],
-    "location": "Outside the town of Eldoria",
+    "location": "Outside the Goblin camp",
     "exits": {
-        "north": "Dark Forest",
-        "west": "Town Square",
-        "south": "Bakery",
+        "north": "Goblin Camp",
+        "west": "Dark Forest",
+        "south": "Dark Forest",
         "east": "Dark Forest"
     }
 }
@@ -322,27 +332,6 @@ character = {
     }
 }
 
-skill_feature_dict = {
-    'Athletics': 'physical feats of strength and endurance, such as climbing, swimming, and jumping',
-    'Acrobatics': 'balance, agility, and performing acrobatic stunts. Includes trying to move across narrow surfaces',
-    'Sleight of Hand': 'manual dexterity and subtlety, such as picking pockets, picking locks, concealing objects, or performing quick-handed tricks',
-    'Stealth': 'remaining unseen or unheard, sneaking past guards, hiding in shadows, or moving silently',
-    'Arcana': 'knowledge of magical lore, spells, and magical items, identifying spells, understanding magical effects, or recognizing arcane symbols',
-    'History': 'knowledge of past events, cultures, battles, and legends',
-    'Investigation': 'finding clues, solving puzzles, deducing information from evidence, searching for hidden objects',
-    'Nature': 'knowledge of the natural world, including flora, fauna, weather, and natural phenomena, identifying plants, animals, and natural hazards',
-    'Religion': 'knowledge of deities, religious traditions, sacred rites, and divine symbols',
-    'Animal Handling': 'interacting with animals, calming them, or training them',
-    'Insight': 'understanding the motives, feelings, or intentions of others, determining if someone is lying, gauging their emotional state, or sensing their true intentions',
-    'Medicine': 'medical knowledge and the ability to heal or diagnose',
-    'Perception': 'using your senses to notice hidden things, spot danger, or detect changes in the environment, noticing traps, hidden enemies, or environmental hazards',
-    'Survival': 'outdoor skills like tracking, foraging, navigating, and enduring harsh conditions, finding food, navigating through the wilderness, and avoiding natural hazards',
-    'Deception': 'convincing others of a falsehood, lying, or disguising your true intentions, bluffing, lying, or misleading others in various situations',
-    'Intimidation': 'using threats, physical presence, or forceful language to influence others',
-    'Performance': 'entertaining others through music, dance, acting, or storytelling',
-    'Persuasion': 'using diplomacy, charm, or social grace to influence others, negotiating, bargaining, convincing, or winning someone over in a non-threatening manner'
-}
-
 
 context = []
 
@@ -355,11 +344,35 @@ def turn(command: str) -> str:
     action_response = make_structured_request(action_rules + json.dumps(game_state, indent=4), command, None, action_schema, 5000, context)
     action = json.loads(action_response['message']['content'])
     success_message = ''
-    if action['DC'] > 0 and action['how_much_needed'] > 2:
+
+    # Handle attack rolls specially, treating DC as the monster armor class.
+    if action['skill'] == 'Attack Roll':
+        die_roll = random.randint(1, 20)
+        modifier = game_state['attack_bonus']
+        if die_roll == 1:
+            success_message = f'Make sure the upcoming player attack fails catastrophically'
+        elif die_roll == 20:
+            success_message = f'Make sure the upcoming player attack is a resounding success'
+        elif die_roll + modifier >= action['DC']:
+            success_message = f'Make sure the upcoming player attack succeeds'
+        else:
+            success_message = f'Make sure the upcoming player attack fails'
+
+        # Now let the monsters attack.  (TODO: support dexterity bonus and swapping order due to initiative)
+        if not game_state['combat']['surprise']:
+            die_roll = random.randint(1, 20)
+            modifier = game_state['combat']['monster_attack_bonus']
+            if die_roll + modifier >= game_state['AC']:
+                monster_message = f'If the monsters survive then make sure the monsters attack succeeds'
+            else:
+                monster_message = f'If the monsters survive then make sure the monsters attack fails'
+            success_message += '\n' + monster_message
+
+    # All other skills
+    elif action['DC'] > 0 and action['how_much_needed'] > 2:
         die_roll = random.randint(1, 20)
         skill = action['skill']
         modifier = character['skills'].get(skill, 0)
-        skill_features = skill_feature_dict.get(skill, skill)
         modifier_text = ''
         if action['how_much_needed'] == 3:
             modifier_text = 'though it should only matter a bit'
