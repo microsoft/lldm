@@ -1,6 +1,7 @@
 import random
 import requests
 import json
+import d20
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
@@ -43,9 +44,12 @@ combat_schema = {
         },
         "monster_dexterity": {
             "type": "integer"
+        },
+        "monster_damage_dice": {
+            "type": "string"
         }
     },
-    "required": ["in_combat", "surprise", "monster_AC", "monster_attack_bonus", "monster_health", "monster_dexterity"],
+    "required": ["in_combat", "surprise", "monster_AC", "monster_attack_bonus", "monster_health", "monster_dexterity", "monster_damage_dice"],
     "additionalProperties": False
 }
 
@@ -71,6 +75,9 @@ game_state_schema = {
         "attack_bonus": {
             "type": "integer"
         },
+        "damage_dice": {
+            "type": "string"
+        },
         "location": {
             "type": "string"
         },
@@ -95,7 +102,7 @@ game_state_schema = {
         },
         "combat": combat_schema
     },
-    "required": ["health", "gold", "AC", "attack_bonus", "inventory", "location", "exits", "combat"],
+    "required": ["health", "gold", "AC", "attack_bonus", "damage_dice", "inventory", "location", "exits", "combat"],
     "additionalProperties": False
 }
 
@@ -159,18 +166,20 @@ def make_structured_request(system_prompt: str, user_prompt: str, second_system_
             ]
             }
         ],
-        "response_format": {
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_tokens": max_tokens
+    }
+
+    if schema:
+        payload['response_format'] = {
             "type": "json_schema",
             "json_schema": {
                 "name": "game_response",
                 "schema": schema,
                 "strict": True
             }
-        },
-        "temperature": temperature,
-        "top_p": top_p,
-        "max_tokens": max_tokens
-    }
+        }
 
     # Add conversation context
     for context_entry in conversation_context:
@@ -250,6 +259,7 @@ where the player ends up.  You are to stay in character as the DM and not reveal
 The player may move around by going in one of the four cardinal directions or by specifying a visible location.
 The player may interact with objects and characters, enter combat, pick up and manipulate items, check their inventory, and check their health.
 The player may ask basic questions about the game but you must only reveal what they know or can see.
+The player may not spend more gold then they have.  If the player attempts to offer more gold than they have while bargaining, their offer will be rejected.
 After the user's turn, give a text response explaining in detail what happened.
 '''
 
@@ -258,18 +268,21 @@ The user is playing a fantasy role-playing game set in a typical medieval sword-
 The user is a player in the game.
 Examine the given action description and determine how the game state has changed, generating the new game state.
 Game State includes the following:
-Health is an integer value from 0 (death) to 10 (full health)
+Health is an integer value representing the player's hit points, according to D&D 5th Edition.
 Gold is an integer that represents the number of gold pieces the player carries.  Do not let the player spend more gold then they have!
 Inventory is a list of items that the player carries.  When the player picks up an item add it to the inventory.  When a player uses up an item or drop it then remove it from the inventory.
 AC is the player's armor class, based on their best equipped armor and following D&D 5th Edition rules.
 Attack Bonus is the bonus modifier of the player's best equipped weapon following D&D 5th Edition rules.
-Combat provides information about whether or not the player is in combat and the state of the combat if one is in progress.  It includes:
+Damage Dice describes the dice that should be rolled to determine damage, in a format like "1d8".
+Combat provides information about whether or not the player is in combat and the state of the combat if one is in progress.  Combat information should be computed if
+any monsters are visible or otherwise available for the player to attack, even if the player has not yet been seen.
 in_combat should be True if the player is engaged in active combat or there are monsters close enough to attack.
 surprise should be True if the monsters are unaware of the player's presence, or False if the player is out in the open or the monsters have been alerted.
 monster_AC is the overall averaged Armor Class of the monsters, following D&D 5th Edition rules.
 monster_attack_bonus is the overall monster attack modifier, following D&D 5th Edition rules and taking into account the general level of the monsters.
-monster_health represents the health of the monsters, on a scale of 0 (death) to 10 (full health).
+monster_health represents the health of the monsters, as hit points from D&D 5th Edition.
 monster_dexterity represents the monster dexterity ability score from D&D 5th Edition, on a scale of 3 (lowest) through 18 (highest).  This includes how fast the monsters can move and react.
+monster_dice represents the dice to be rolled to determine damage done by the monsters if they hit, in a format like "2d4+2".  This should be determined using D&D 5th Edition rules.
 Do not change the inventory without notifying the player in your response.
 Location is the current location of the player
 Direction specifiers like North, South, Up, etc specify the locations the player may reach by moving in a direction
@@ -285,17 +298,20 @@ Skills, Ability, and Difficulty Class should be computed following the rules of 
 averaged Armor Class of the monsters the player faces.
 '''
 
+death_rules = '''
+The user is playing a fantasy role-playing game set in a typical medieval sword-and-sorcery RPG setting and you are the Dungeon Master.
+The player has just died.  Display an appropriate game over message and summarize the player's achievements.
+'''
+
 game_state = {
-    "health": 10,
+    "health": 1,
     "gold": 20,
     "inventory": [
-        "Longsword",
-        "Chainmail",
-        "Sturdy shield"
+        "Short sword"
     ],
-    "location": "Outside the Goblin camp",
+    "location": "Outside the Dragon's lair",
     "exits": {
-        "north": "Goblin Camp",
+        "north": "Dragon's lair",
         "west": "Dark Forest",
         "south": "Dark Forest",
         "east": "Dark Forest"
@@ -348,24 +364,40 @@ def turn(command: str) -> str:
     # Handle attack rolls specially, treating DC as the monster armor class.
     if action['skill'] == 'Attack Roll':
         die_roll = random.randint(1, 20)
+        damage_roll = d20.roll(game_state['damage_dice']).total
         modifier = game_state['attack_bonus']
         if die_roll == 1:
             success_message = f'Make sure the upcoming player attack fails catastrophically'
+            damage_roll = 0
         elif die_roll == 20:
-            success_message = f'Make sure the upcoming player attack is a resounding success'
+            success_message = f'Make sure the upcoming player attack is a resounding success, doing {damage_roll} damage'
         elif die_roll + modifier >= action['DC']:
-            success_message = f'Make sure the upcoming player attack succeeds'
+            success_message = f'Make sure the upcoming player attack succeeds, doing {damage_roll} damage'
         else:
             success_message = f'Make sure the upcoming player attack fails'
+            damage_roll = 0
+        monster_death = False
+        if game_state['combat']['monster_health'] - damage_roll <= 0:
+            monster_death = True
+        if monster_death:
+            success_message += ' and killing the monsters'
 
         # Now let the monsters attack.  (TODO: support dexterity bonus and swapping order due to initiative)
-        if not game_state['combat']['surprise']:
+        if not game_state['combat']['surprise'] and not monster_death:
             die_roll = random.randint(1, 20)
+            damage_roll = d20.roll(game_state['combat']['monster_damage_dice']).total
             modifier = game_state['combat']['monster_attack_bonus']
             if die_roll + modifier >= game_state['AC']:
-                monster_message = f'If the monsters survive then make sure the monsters attack succeeds'
+                monster_message = f'Make sure the monsters attack succeeds, doing {damage_roll} damage'
             else:
-                monster_message = f'If the monsters survive then make sure the monsters attack fails'
+                monster_message = f'Make sure the monsters attack fails'
+                damage_roll = 0
+            if damage_roll >= game_state['health']:
+                death = True
+            else:
+                death = False
+            if death:
+                monster_message += ' and killing the player'
             success_message += '\n' + monster_message
 
     # All other skills
@@ -396,6 +428,10 @@ def turn(command: str) -> str:
     game_state = new_state
     print(response)
     print(game_state)
+    if game_state['health'] <= 0:
+        death_response = make_structured_request(death_rules + json.dumps(game_state, indent=4), '', None, None, 2000, context)
+        print(death_response['message']['content'])
+        exit(0)
 
 
 def main():
