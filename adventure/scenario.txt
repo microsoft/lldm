@@ -1,0 +1,22 @@
+This adventure takes place in the Kingdom of Eventuride.  Eventuride is a fantsay kingdom set in a world of heros and magic,
+containing great treasures and ferocious beasts.
+
+The kingdom lies between the Great Sea to the south and the tall Mountains of Might to the north.  Between the two lies the vast Eldor Forest,
+which is rumored to hide many secrets.  The mighty Trane River runs south from the mountains to the sea, dividng the kingdom roughly in half.
+At the mouth of the river is the great capital city of Doon, a bustling seaside metropolis flanked by a great palace just northwest of the city.
+The King's Road leads north by northwest away from the city through the more populared western half of the Kingdom.  Fishing villages dot the coast
+which extends west and south of the capital.
+
+To the east the coast becomes more rugged and the roads are less traveled.  A few small towns lie along the coast, connected to the capital by
+simple roads, but beyond that lies the Wild Coast.  To the Northeast of Doon the forest becomes dense, tangled, and more difficult to traverse.
+Few go this way except along the Old Road which stays near the east bank of the Trane River.
+
+Three Days north of Doon along the Old Road stands old Riverton, and old town highlighted by one of the northernmost bridges to span the Trane.
+From here the Old Road turns northeast, passing through the Town of Eldoria on its way toward the mountains.  Eldoria and the forest that
+surrounds it is a popular stop for adventurers seeking their fortune in the deep forest and the northern mountains.
+
+You begin your journey along the Old Road by the entrance to Eldoria.
+You are a young wizard fresh out of the magical academy.  Tired of the big city, you traveled here from the capital looking for fortune and aventure.
+You have 8 health and a pouch with 20 gold pieces.  You carry a wooden staff and wear a cloth tunic.
+You have a spell book with the only three spells you know: Magic Missile, Shield, and Charm Person.
+

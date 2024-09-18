@@ -2,6 +2,7 @@ import random
 import requests
 import json
 import d20
+import argparse
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
@@ -304,10 +305,12 @@ The player has just died.  Display an appropriate game over message and summariz
 '''
 
 game_state = {
-    "health": 1,
+    "health": 20,
     "gold": 20,
     "inventory": [
         "Short sword"
+        "Leather armor",
+        "Simple shield"
     ],
     "location": "Outside the Dragon's lair",
     "exits": {
@@ -351,8 +354,28 @@ character = {
 
 context = []
 
+def read_player_file(player_file: str):
+    pass
 
-def turn(command: str) -> str:
+def read_scenario_file(scenario_file: str):
+    global context
+    global game_state
+
+    file_content = None
+    try:
+        with open(scenario_file, 'r') as file:
+            file_content = file.read()
+    except FileNotFoundError:
+        print(f"The scenario file at {scenario_file} was not found.")
+        return None
+    
+    # Make an LLM call to determine the initial game state from the text in the scenario file
+    initial_state_response = make_structured_request(state_change_rules, file_content, None, game_state_schema, 2000, [])
+    game_state = json.loads(initial_state_response['message']['content'])
+    context.append(('Game World', file_content))
+
+
+def turn(command: str, debug: bool) -> str:
     global game_state
     global context
 
@@ -414,8 +437,10 @@ def turn(command: str) -> str:
             success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it succeeds {modifier_text}'
         else:
             success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it fails {modifier_text}.'
-    print(action)
-    print(success_message)
+    
+    if debug:
+        print(action)
+        print(success_message)
 
     # Perform the action
     result = make_structured_request(game_rules + json.dumps(game_state, indent=4), command, success_message, game_schema, 5000, context)
@@ -427,7 +452,8 @@ def turn(command: str) -> str:
     context.append((success_message + '\n' + command, response))
     game_state = new_state
     print(response)
-    print(game_state)
+    if debug:
+        print(game_state)
     if game_state['health'] <= 0:
         death_response = make_structured_request(death_rules + json.dumps(game_state, indent=4), '', None, None, 2000, context)
         print(death_response['message']['content'])
@@ -435,13 +461,36 @@ def turn(command: str) -> str:
 
 
 def main():
+    # Retrieve API Key from Keyvault
     global api_key
     api_key = get_api_key().value
 
-    turn('begin the game')
+    # Create the argument parser
+    parser = argparse.ArgumentParser(description="Game World Setup")
+
+    # Add arguments
+    parser.add_argument('--scenario', type=str, required=False,
+                        help='Path to the scenario file describing the world for the game.')
+    parser.add_argument('--player', type=str, required=False,
+                        help='Path to the player file describing attributes of the player.')
+    parser.add_argument('--debug', type=bool, default=False, nargs='?',
+                        const=True, help='Enable or disable debug mode (default: False).')
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Access the arguments
+    scenario_file = args.scenario
+    player_file = args.player
+    debug_mode = args.debug
+
+    read_scenario_file(scenario_file)
+    read_player_file(player_file)
+
+    turn('begin the game', debug_mode)
     while True:
         command = input('>')
-        turn(command)
+        turn(command, debug_mode)
 
 if __name__=="__main__":
     main()
