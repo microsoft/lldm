@@ -1,5 +1,6 @@
 import random
 import requests
+from requests import HTTPError
 import json
 import d20
 import argparse
@@ -7,7 +8,7 @@ from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
 
-def get_api_key():
+def get_api_key(key_vault_name, secret_name):
     # Set the key vault name and secret name
     key_vault_name = "aoaikeys"
     secret_name = "AOAIKey"
@@ -22,10 +23,14 @@ def get_api_key():
     return client.get_secret(secret_name)
 
 
-ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-15-preview"
-ENDPOINT = "https://dasommer-oai-cmk.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2023-03-15-preview"
-api_key = ''
+DEFAULT_ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-15-preview"
+DEFAULT_ENDPOINT = "https://dasommer-oai-cmk.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2023-03-15-preview"
+DEFAULT_KEY_VAULT = "aoaikeys"
+DEFAULT_SN = "AOAIKey"
+DEFAULT_SN = "AOAIKeySCUS"
 
+api_key = ''
+endpoint = ''
 player = {}
 player_text = ''
 
@@ -101,6 +106,9 @@ character_schema = {
         "Name": {
             "type": "string"
         },
+        "Pronouns": {
+            "type": "string"
+        },
         "Class": {
             "type": "string"
         },
@@ -138,7 +146,7 @@ character_schema = {
         },
         "Magic": magic_schema
     },
-    "required": ["Name", "Class", "Level", "Health", "Abilities", "Proficiencies", "Magic"],
+    "required": ["Name", "Pronouns", "Class", "Level", "Health", "Abilities", "Proficiencies", "Magic"],
     "additionalProperties": False
 }
 
@@ -404,14 +412,10 @@ def make_structured_request(system_prompt: str, user_prompt: str, second_system_
     })
 
     # Send request
-    try:
-        response = requests.post(ENDPOINT, headers=headers, json=payload)
-        if response.status_code == 400:
-            print(f"Error 400: Bad Request - {response.text}")
-        response.raise_for_status()  # Will raise an HTTPError if the HTTP request returned an unsuccessful status code
-    except requests.RequestException as e:
-        print(json.dumps(payload, indent=4))
-        raise SystemExit(f"Failed to make the request. Error: {e}")
+    response = requests.post(endpoint, headers=headers, json=payload)
+    if response.status_code == 400:
+        print(f"Error 400: Bad Request - {response.text}")
+    response.raise_for_status()  # Will raise an HTTPError if the HTTP request returned an unsuccessful status code
 
     # Handle the response as needed (e.g., print or process)
     return response.json()['choices'][0]
@@ -569,7 +573,7 @@ def compute_action_response(command:str, debug: bool) -> str:
     # First determine what sort of checks (if any) need to be made on the coming action
     action_response = make_structured_request(action_rules + json.dumps(player, indent=4) + json.dumps(game_state, indent=4), command, None, action_schema, 5000, context)
     action = json.loads(action_response['message']['content'])
-    success_message = ''
+    success_message: str = ''
 
     # Handle attack rolls specially, treating DC as the monster armor class.
     if action['skill'] == 'Attack Roll':
@@ -626,7 +630,7 @@ def compute_action_response(command:str, debug: bool) -> str:
             success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it fails {modifier_text}.'
 
     if success_message:
-        success_messsage += '\nIf this action resulted in the player health dropping to 0 or lower, make sure the player gets killed.'
+        success_message += '\nIf this action resulted in the player health dropping to 0 or lower, make sure the player gets killed.'
     
     if debug:
         print(action)
@@ -695,7 +699,7 @@ def turn(command: str, debug: bool) -> str:
 def main():
     # Retrieve API Key from Keyvault
     global api_key
-    api_key = get_api_key().value
+    global endpoint
 
     # Create the argument parser
     parser = argparse.ArgumentParser(description="Game World Setup")
@@ -705,11 +709,27 @@ def main():
                         help='Path to the scenario file describing the world for the game.')
     parser.add_argument('--player', type=str, required=True,
                         help='Path to the player file describing attributes of the player.')
+    parser.add_argument('--endpoint', type=str, default=DEFAULT_ENDPOINT,
+                        help='URI to OAI or AOAI gpt4o endpoint.')
+    parser.add_argument('--api_key', type=str, required=False,
+                        help='API Key for (A)OAI endpoint (if not using keyvault)')
+    parser.add_argument('--key_vault', type=str, default=DEFAULT_KEY_VAULT,
+                        help='Name of the key vault to use to lookup the API Key')
+    parser.add_argument('--secret_name', type=str, default=DEFAULT_SN,
+                        help='Name of the secret in the key vault containing the API Key')
     parser.add_argument('--debug', type=bool, default=False, nargs='?',
                         const=True, help='Enable or disable debug mode (default: False).')
 
     # Parse arguments
     args = parser.parse_args()
+    if not args.api_key:
+        if not args.key_vault or not args.secret_name:
+            print("Must specify either --api_key or both --key_vault and --secret_name")
+            exit(1)
+        api_key = get_api_key(args.key_vault, args.secret_name).value
+    else:
+        api_key = args.api_key
+    endpoint = args.endpoint
 
     # Access the arguments
     scenario_file = args.scenario
@@ -726,7 +746,10 @@ def main():
     turn('begin the game', debug_mode)
     while True:
         command = input('>')
-        turn(command, debug_mode)
+        try:
+            turn(command, debug_mode)
+        except HTTPError as e:
+            print(f'Turn failed with exception: {e}')
 
 if __name__=="__main__":
     main()
