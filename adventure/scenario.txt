@@ -8,15 +8,20 @@ The King's Road leads north by northwest away from the city through the more pop
 which extends west and south of the capital.
 
 To the east the coast becomes more rugged and the roads are less traveled.  A few small towns lie along the coast, connected to the capital by
-simple roads, but beyond that lies the Wild Coast.  To the Northeast of Doon the forest becomes dense, tangled, and more difficult to traverse.
-Few go this way except along the Old Road which stays near the east bank of the Trane River.
+simple roads, but beyond that lies the Wild Coast.  To the Northeast of Doon the forest becomes dense, tangled, and more difficult to traverse,
+with few roads.
 
-Three Days north of Doon along the Old Road stands old Riverton, and old town highlighted by one of the northernmost bridges to span the Trane.
-From here the Old Road turns northeast, passing through the Town of Eldoria on its way toward the mountains.  Eldoria and the forest that
-surrounds it is a popular stop for adventurers seeking their fortune in the deep forest and the northern mountains.
+The Old Road leads up the Trane River, staying close to the West Bank.  Farmsteads and the occasional small town can be found along this road, along
+with the occasional bridge crossing the river.
 
-You begin your journey along the Old Road by the entrance to Eldoria.
-You are a young wizard fresh out of the magical academy.  Tired of the big city, you traveled here from the capital looking for fortune and aventure.
-You have 8 health and a pouch with 20 gold pieces.  You carry a wooden staff and wear a cloth tunic.
-You have a spell book with the only three spells you know: Magic Missile, Shield, and Charm Person.
+A full two Week's journey north of Doon along the Old Road stands old Riverton, and old town at the edge of the foothills of the mountains
+which spans the river at its northernmost crossing.  North of here the river becomes much more rugged as it flows through the foothills.
+The road crosses the bridge and heads northeast into the forest which becomes hillier as the road continues toward the north.
+A couple days further is the Town of Eldoria, the jewel of the forest.  This is a popular stop for adventurers seeking their
+fortune in the deep forest and the northen mountains and rumors abount of mysterious ruins and fabulous treasure deep in the
+forest beyond.
+
+You begin your adventure on the Old Road, just outside the town of Eldoria.
+It is just before noon, on a bright midsummer day.
+For the purposes of determining seasons and length of the day, we'll consider Eldoria to be at about 45 degrees north latitude.
 

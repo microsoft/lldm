@@ -1,0 +1,3 @@
+This player is a typical first-level Rogue, about to embark on their first adventure.
+The player has 20 gold pieces, is armed with a short sword, and wears leather armor.
+
