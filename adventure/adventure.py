@@ -11,7 +11,7 @@ def get_api_key():
     # Set the key vault name and secret name
     key_vault_name = "aoaikeys"
     secret_name = "AOAIKey"
-    #secret_name = "AOAIKeySCUS"
+    secret_name = "AOAIKeySCUS"
 
     # Create the Key Vault URL
     key_vault_url = f"https://{key_vault_name}.vault.azure.net/"
@@ -23,7 +23,7 @@ def get_api_key():
 
 
 ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-15-preview"
-#ENDPOINT = "https://dasommer-oai-cmk.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2023-03-15-preview"
+ENDPOINT = "https://dasommer-oai-cmk.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2023-03-15-preview"
 api_key = ''
 
 player = {}
@@ -52,6 +52,45 @@ ability_schema = {
         }
     },
     "required": ["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"],
+    "additionalProperties": False
+}
+
+# Magic schema, including spells known and spell slots
+spell_slots_schema = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "level": {
+                "type": "integer"
+            },
+            "slots": {
+                "type": "integer"
+            }
+        },
+        "required": ["level", "slots"],
+        "additionalProperties": False
+    }
+}
+
+magic_schema = {
+    "type": "object",
+    "properties": {
+        "Spells Known": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "Cantrips Known": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "Spell Slots": spell_slots_schema
+    },
+    "required": ["Spells Known", "Cantrips Known", "Spell Slots"],
     "additionalProperties": False
 }
 
@@ -96,9 +135,10 @@ character_schema = {
             },
             "required": ["Skills", "Weapons", "Saving Throws"],
             "additionalProperties": False
-        }
+        },
+        "Magic": magic_schema
     },
-    "required": ["Name", "Class", "Level", "Health", "Abilities", "Proficiencies"],
+    "required": ["Name", "Class", "Level", "Health", "Abilities", "Proficiencies", "Magic"],
     "additionalProperties": False
 }
 
@@ -166,10 +206,36 @@ game_state_schema = {
         "gold": {
             "type": "integer"
         },
+        "AC": {
+            "type": "integer"
+        },
         "inventory": {
             "type": "array",
             "items": {
                 "type": "string"
+            }
+        },
+        "spell_slots": spell_slots_schema,
+        "spells_prepared": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "spell_effects": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "effect": {
+                        "type": "string",
+                    },
+                    "minutes_remaining": {
+                        "type": "integer"
+                    }
+                },
+                "required": ["effect", "minutes_remaining"],
+                "additionalProperties": False
             }
         },
         "location": {
@@ -178,8 +244,17 @@ game_state_schema = {
         "time_of_day": {
             "type": "string"
         },
+        "sunrise": {
+            "type": "string"
+        },
+        "sunset": {
+            "type": "string"
+        },
         "date": {
             "type": "string"
+        },
+        "dark": {
+            "type": "boolean"
         },
         "monsters": {
             "type": "array",
@@ -190,7 +265,7 @@ game_state_schema = {
             "items": character_schema
         }
     },
-    "required": ["health", "gold", "inventory", "location", "time_of_day", "date", "monsters", "allies"],
+    "required": ["health", "gold", "AC", "inventory", "spell_slots", "spells_prepared", "spell_effects", "location", "time_of_day", "sunrise", "sunset", "date", "dark", "monsters", "allies"],
     "additionalProperties": False
 }
 
@@ -364,19 +439,38 @@ The player may move around by going in one of the four cardinal directions or by
 The player may interact with objects and characters, enter combat, pick up and manipulate items, check their inventory, and check their health.
 The player may ask basic questions about the game but you must only reveal what they know or can see.
 The player may not spend more gold then they have.  If the player attempts to offer more gold than they have while bargaining, their offer will be rejected.
+
+Light:
+Some areas are dark, including unlit interior spaces along with anything outdoors if not near a light source.
+When in a dark area the player will need light or they will be unable to see unless they have a natural ability to see in the dark.
+Moving in the dark wihtout light or night vision is very dangerous.  Checks must be made on every movement and all player actions
+will be taken with disadvantage.
+
+Magic:
+only spellcasters may cast magic spells.
+spellcasters begin each day with no prepared spells and open spell slots as per their character sheet.
+spellcasters can only cast spells that they've prepared, and casting a spell will remove that spell from the prepared spell list.
+spellcasters can prepare spells only if they are in a safe location.  Spellcasters can only prepare spells that they know.
+Spellcasters can only prepare a spell if they have a slot of the spell's level.
+preparing a spell adds it to the caster's prepared spells and subtracts one spell slot of the spell's level.
+Spellcasters can choose to prepare a spell at a higher level, but not a lower level than the spell's level.
+Preparing a spell takes ten minutes per spell level.  Preparing a spell does not trigger any spell effects; the player must explicitly cast the spell for it to take effect.
+Spellcasters may also freely cast any cantrips that they know.  Cantrips do not require preparation and do not consume spell slots.
+Spellcasters may not cast cantrips that they do not know.
+
 After the user's turn, give a text response explaining in detail what happened.
 '''
 
 state_change_rules = '''
-The user is playing a fantasy role-playing game set in a typical medieval sword-and-sorcery RPG setting and you are the Dungeon Master.
-The user is a player in the game.
 Examine the given action description and determine how the game state has changed, generating the new game state in JSON.  Only include the JSON response.
 Game State includes the following:
 Health is an integer value representing the player's hit points, according to D&D 5th Edition.
 Gold is an integer that represents the number of gold pieces the player carries.  Do not let the player spend more gold then they have!
 Inventory is a list of items that the player carries.  When the player picks up an item add it to the inventory.  When a player uses up an item or drop it then remove it from the inventory.
 Time of Day tracks the current time of day, in HH:MM format using 24-hour time.  Actions take time and the time of day should be updated accordingly.
+Sunrise and Sunset should be computed based on the current date.  These should also be used to determine when it is night.
 Date tracks the current month and day and should be in a form like "July 1".  This is used to determine sunset and sunrise times as well as to determine seasons.
+Dark determines if the player is operating in darkness, meaning the area is dark and the player has no light or night vision ability.
 If any monsters are present in the room, they should each be listed.
 Each monster should have an identifier which can be used to differentiate them from other monsters also present, typically constructed by adding an adjective to the monster type.
 For example "Fierce Goblin" or "Sneaky Lizard".  Monsters should also have Health, a Description, AC, ability scores, and a status indicator.
@@ -407,6 +501,10 @@ The player's longsword will strike the Goblin for 1d8 points of damage
 The player will attempt to pick the lock but will fail
 The Orc will miss the player on the next round
 The player's attempt to search for treasure will trigger a poison needle trap
+
+Darkness:
+Moving around in darkness is extremely dangerous and will always require a check taken with disadvantage.
+Other actions take in darkness are always done with disadvantage.
 '''
 
 
@@ -418,55 +516,13 @@ The player has just died.  Display an appropriate game over message and summariz
 character_rules = '''
 What follows is a description of a character in a fantasy role-playing game using D&D 5th Edition rules.
 Generate the character's statistics using a structured JSON format.
+For spellcasters, magic spell slots should be determined using D&D 5th Edition rules based on the character class and level.
+Spells known and cantrips known should be filled out as would be typical based on the character background.
 '''
 
-game_state = {
-    "health": 20,
-    "gold": 20,
-    "inventory": [
-        "Short sword"
-        "Leather armor",
-        "Simple shield"
-    ],
-    "location": "Outside the Dragon's lair",
-    "exits": {
-        "north": "Dragon's lair",
-        "west": "Dark Forest",
-        "south": "Dark Forest",
-        "east": "Dark Forest"
-    }
-}
+game_state = {}
 
-
-character = {
-    "Strength": (16,3),
-    "Dexterity": (14,2),
-    "Constitution": (15,2),
-    "Intelligence": (9,-1),
-    "Wisdom": (11,0),
-    "Charisma": (13,1),
-    "skills": {
-        "Athletics": 5,
-        "Acrobatics": 4,
-        "Sleight of Hand": 2,
-        "Stealth": 2,
-        "Arcana": -1,
-        "History": -1,
-        "Investigation": -1,
-        "Nature": -1,
-        "Religion": -1,
-        "Animal Handling": 0,
-        "Insight": 0,
-        "Medicine": 0,
-        "Perception": 2,
-        "Survival": 0,
-        "Deception": 1,
-        "Intimidation": 3,
-        "Performance": 1,
-        "Persuasion": 3
-    }
-}
-
+character = {}
 
 context = []
 
@@ -624,7 +680,7 @@ def turn(command: str, debug: bool) -> str:
     result = make_structured_request(game_rules + json.dumps(player, indent=4) + json.dumps(game_state, indent=4), command, success_message, None, 5000, context)
     response = result['message']['content']
     print(response)
-    new_state_response = make_structured_request(state_change_rules + json.dumps(game_state, indent=4), response, None, game_state_schema, 2000, [])
+    new_state_response = make_structured_request(game_rules + '\n' + state_change_rules + '\nCurrent game state: ' + json.dumps(game_state, indent=4), response, None, game_state_schema, 5000, [])
     new_state = json.loads(new_state_response['message']['content'])
     context.append((command, response))
     game_state = new_state
