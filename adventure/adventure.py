@@ -224,12 +224,6 @@ game_state_schema = {
             }
         },
         "spell_slots": spell_slots_schema,
-        "spells_prepared": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
         "spell_effects": {
             "type": "array",
             "items": {
@@ -268,12 +262,12 @@ game_state_schema = {
             "type": "array",
             "items": monster_schema
         },
-        "allies": {
+        "NPCs": {
             "type": "array",
             "items": character_schema
         }
     },
-    "required": ["health", "gold", "AC", "inventory", "spell_slots", "spells_prepared", "spell_effects", "location", "time_of_day", "sunrise", "sunset", "date", "dark", "monsters", "allies"],
+    "required": ["health", "gold", "AC", "inventory", "spell_slots", "spell_effects", "location", "time_of_day", "sunrise", "sunset", "date", "dark", "monsters", "NPCs"],
     "additionalProperties": False
 }
 
@@ -451,15 +445,13 @@ Moving in the dark wihtout light or night vision is very dangerous.  Checks must
 will be taken with disadvantage.
 
 Magic:
-only spellcasters may cast magic spells.
-spellcasters begin each day with no prepared spells and open spell slots as per their character sheet.
-spellcasters can only cast spells that they've prepared, and casting a spell will remove that spell from the prepared spell list.
-spellcasters can prepare spells only if they are in a safe location.  Spellcasters can only prepare spells that they know.
-Spellcasters can only prepare a spell if they have a slot of the spell's level.
-preparing a spell adds it to the caster's prepared spells and subtracts one spell slot of the spell's level.
-Spellcasters can choose to prepare a spell at a higher level, but not a lower level than the spell's level.
-Preparing a spell takes ten minutes per spell level.  Preparing a spell does not trigger any spell effects; the player must explicitly cast the spell for it to take effect.
-Spellcasters may also freely cast any cantrips that they know.  Cantrips do not require preparation and do not consume spell slots.
+Magic follows the rules of D&D 5th Edition.
+only spellcasters may cast magic spells or cantrips.
+Spellcasters may only cast spells that they know.
+A spellcaster may only cast a spell if they have a spell slot for that spell's level.
+For example, a spellcaster must have a first level spell slot to cast the first level spell Magic Missile.
+Casting a spell deducts a spell slot for that spell's level.
+Spellcasters may freely cast any cantrips that they know.  Cantrips do not consume spell slots.
 Spellcasters may not cast cantrips that they do not know.
 
 After the user's turn, give a text response explaining in detail what happened.
@@ -479,8 +471,8 @@ If any monsters are present in the room, they should each be listed.
 Each monster should have an identifier which can be used to differentiate them from other monsters also present, typically constructed by adding an adjective to the monster type.
 For example "Fierce Goblin" or "Sneaky Lizard".  Monsters should also have Health, a Description, AC, ability scores, and a status indicator.
 The status indicator determines if the monster has some unusual status that might affect how it behaves in combat.
-If any allies are traveling with the player and can help the player in combat, they should also be listed.
-Allies have statistics very similar to those of a player character, and each ally has a name.
+Any NPCs in the room should be listed in the NPC section.
+NPCs have statistics very similar to those of a player character, and each NPC has a name.
 '''
 
 action_rules = '''
@@ -489,11 +481,12 @@ This game uses D&D 5th Edition rules.
 The player is about to execute their turn and there may be other characters and monsters present who will act as well.
 Using the supplied characer sheet, game state, and the rules of the game, determine all the actions that will occur during this turn, outputting everything in JSON and only JSON.
 The first action will always be based on the command entered by the player.
-This will be followed by actions from any monsters and allies present.
+This will be followed by actions from any monsters and NPCs present.
 Finally any environmental actions will occur including sprung traps.
 For each action, first determine if a die roll is necessary.
 If a die roll is necessary, describe what rules
 to use and how to determine whether this action will succeed or fail using the die roll, expressed as the dice to roll (in a form like "3d20") and a number to beat.
+Dice to roll must only describe a dice expression and must not include extraneous text.  For example:  3d20+2 is OK.  3d20+Wisdom Modifier is wrong.
 If a die roll is not necessary, leave dice_to_roll blank (empty string)
 Set advantage if the die roll is to be made with Advantage
 Set disadvantage if the die roll is to be made with Disadvantage
@@ -566,78 +559,6 @@ def read_scenario_file(scenario_file: str):
     context.append(('Player', player_text))
 
 
-def compute_action_response(command:str, debug: bool) -> str:
-    global game_state
-    global context
-
-    # First determine what sort of checks (if any) need to be made on the coming action
-    action_response = make_structured_request(action_rules + json.dumps(player, indent=4) + json.dumps(game_state, indent=4), command, None, action_schema, 5000, context)
-    action = json.loads(action_response['message']['content'])
-    success_message: str = ''
-
-    # Handle attack rolls specially, treating DC as the monster armor class.
-    if action['skill'] == 'Attack Roll':
-        die_roll = random.randint(1, 20)
-        damage_roll = d20.roll(game_state['damage_dice']).total
-        modifier = game_state['attack_bonus']
-        if die_roll == 1:
-            success_message = f'Make sure the upcoming player attack fails catastrophically'
-            damage_roll = 0
-        elif die_roll == 20:
-            success_message = f'Make sure the upcoming player attack is a resounding success, doing {damage_roll} damage'
-        elif die_roll + modifier >= action['DC']:
-            success_message = f'Make sure the upcoming player attack succeeds, doing {damage_roll} damage'
-        else:
-            success_message = f'Make sure the upcoming player attack fails'
-            damage_roll = 0
-        monster_death = False
-        if game_state['combat']['monster_health'] - damage_roll <= 0:
-            monster_death = True
-        if monster_death:
-            success_message += ' and killing the monsters'
-
-        # Now let the monsters attack.  (TODO: support dexterity bonus and swapping order due to initiative)
-        if not game_state['combat']['surprise'] and not monster_death:
-            die_roll = random.randint(1, 20)
-            damage_roll = d20.roll(game_state['combat']['monster_damage_dice']).total
-            modifier = game_state['combat']['monster_attack_bonus']
-            if die_roll + modifier >= game_state['AC']:
-                monster_message = f'Make sure the monsters attack succeeds, doing {damage_roll} damage'
-            else:
-                monster_message = f'Make sure the monsters attack fails'
-                damage_roll = 0
-            if damage_roll >= game_state['health']:
-                death = True
-            else:
-                death = False
-            if death:
-                monster_message += ' and killing the player'
-            success_message += '\n' + monster_message
-
-    # All other skills
-    elif action['DC'] > 0 and action['how_much_needed'] > 2:
-        die_roll = random.randint(1, 20)
-        skill = action['skill']
-        modifier = character['skills'].get(skill, 0)
-        modifier_text = ''
-        if action['how_much_needed'] == 3:
-            modifier_text = 'though it should only matter a bit'
-        elif action['how_much_needed'] == 5:
-            modifier_text = 'and it should matter a lot'
-        if die_roll + modifier >= action['DC']:
-            success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it succeeds {modifier_text}'
-        else:
-            success_message = f'The upcoming action requires {skill} because {action["why_needed"]}.  Make sure it fails {modifier_text}.'
-
-    if success_message:
-        success_message += '\nIf this action resulted in the player health dropping to 0 or lower, make sure the player gets killed.'
-    
-    if debug:
-        print(action)
-        print(success_message)
-    return success_message
-
-
 # Roll dice, taking into account advantage and disadvantage 
 def roll_dice(dice_to_roll: str, advantage: bool, disadvantage: bool) -> int:
     result = d20.roll(dice_to_roll).total
@@ -663,15 +584,19 @@ def llm_action_response(command: str, debug: bool) -> str:
     message = ''
     for action in actions['actions']:
         if action['dice_to_roll']:
-            roll = roll_dice(action['dice_to_roll'], action['advantage'], action['disadvantage'])
-            if roll >= action['number_to_beat']:
-                message += action['result_if_successful'] + "\n"
-            else:
-                message += action['result_if_failed'] + "\n"
+            try:
+                roll = roll_dice(action['dice_to_roll'], action['advantage'], action['disadvantage'])
+                if roll >= action['number_to_beat']:
+                    message += action['result_if_successful'] + "\n"
+                else:
+                    message += action['result_if_failed'] + "\n"
+            except d20.errors.RollSyntaxError as e:
+                # on the off chance we gat bad die roll syntax, show the error but don't halt the game; just omit the action message
+                print(f'Die roll error: {e}')
     return message
 
 
-def turn(command: str, debug: bool) -> str:
+def turn(command: str, debug: bool):
     global game_state
     global context
 

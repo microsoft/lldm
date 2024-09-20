@@ -1,5 +1,12 @@
 The player is a second-level wizard from Riverton, on a journey into the wild lands to collect herbs and research
 the lands, and perhaps have an adventure or two.
 The player wears a cloth tunic and carries a wooden staff and has 25 gold pieces.
-His spellbook has a selection of typical spells expected for a wizard of this level.
-The player starts the game along the Old Road, near the town of Eldoria, with no spells prepared.
+The player has a spellbook with the following spells:
+Magic Missile
+Shield
+Tasha's Irresistable Laughter
+Charm Person
+Identify
+Burning Hands
+The player also knows a typical level-appropriate selection of cantrips.
+The player starts the game along the Old Road, near the town of Eldoria.
