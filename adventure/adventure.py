@@ -23,8 +23,8 @@ def get_api_key(key_vault_name, secret_name):
     return client.get_secret(secret_name)
 
 
-DEFAULT_ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-15-preview"
-DEFAULT_ENDPOINT = "https://dasommer-oai-cmk.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2023-03-15-preview"
+DEFAULT_ENDPOINT = "https://dasommer-oai-ncus.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-09-01-preview"
+DEFAULT_ENDPOINT = "https://dasommer-oai-cmk.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-09-01-preview"
 DEFAULT_KEY_VAULT = "aoaikeys"
 DEFAULT_SN = "AOAIKey"
 DEFAULT_SN = "AOAIKeySCUS"
@@ -72,9 +72,12 @@ spell_slots_schema = {
             },
             "slots": {
                 "type": "integer"
+            },
+            "max slots": {
+                "type": "integer"
             }
         },
-        "required": ["level", "slots"],
+        "required": ["level", "slots", "max slots"],
         "additionalProperties": False
     }
 }
@@ -100,6 +103,23 @@ magic_schema = {
     "additionalProperties": False
 }
 
+spell_effects_schema = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "effect": {
+                "type": "string",
+            },
+            "minutes_remaining": {
+                "type": "integer"
+            }
+        },
+        "required": ["effect", "minutes_remaining"],
+        "additionalProperties": False
+    }
+}
+
 # Character schema.  This defines the player character and all abilities
 character_schema = {
     "type": "object",
@@ -119,7 +139,22 @@ character_schema = {
         "Level": {
             "type": "integer"
         },
-        "Health": {
+        "XP": {
+            "type": "integer"
+        },
+        "HP": {
+            "type": "integer"
+        },
+        "Max HP": {
+            "type": "integer"
+        },
+        "Status": {
+            "type": "string"
+        },
+        "Gold": {
+            "type": "integer"
+        },
+        "AC": {
             "type": "integer"
         },
         "Abilities": ability_schema,
@@ -148,39 +183,16 @@ character_schema = {
             "required": ["Skills", "Weapons", "Saving Throws"],
             "additionalProperties": False
         },
-        "Magic": magic_schema
-    },
-    "required": ["Name", "Pronouns", "Race", "Class", "Level", "Health", "Abilities", "Proficiencies", "Magic"],
-    "additionalProperties": False
-}
-
-# Combat schema.  Includes all information needed to manage combat
-combat_schema = {
-    "type": "object",
-    "properties": {
-        "in_combat": {
-            "type": "boolean"
-        },
-        "surprise": {
-            "type": "boolean"
-        },
-        "monster_AC": {
-            "type": "integer"
-        },
-        "monster_attack_bonus": {
-            "type": "integer"
-        },
-        "monster_health": {
-            "type": "integer"
-        },
-        "monster_dexterity": {
-            "type": "integer"
-        },
-        "monster_damage_dice": {
-            "type": "string"
+        "Magic": magic_schema,
+        "Spell Effects": spell_effects_schema,
+        "Inventory": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
         }
     },
-    "required": ["in_combat", "surprise", "monster_AC", "monster_attack_bonus", "monster_health", "monster_dexterity", "monster_damage_dice"],
+    "required": ["Name", "Pronouns", "Race", "Class", "Level", "XP", "HP", "Max HP", "Status", "Gold", "AC", "Abilities", "Proficiencies", "Magic", "Spell Effects", "Inventory"],
     "additionalProperties": False
 }
 
@@ -212,40 +224,13 @@ monster_schema = {
 game_state_schema = {
     "type": "object",
     "properties": {
-        "health": {
-            "type": "integer"
-        },
-        "gold": {
-            "type": "integer"
-        },
-        "AC": {
-            "type": "integer"
-        },
-        "inventory": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
-        "spell_slots": spell_slots_schema,
-        "spell_effects": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "effect": {
-                        "type": "string",
-                    },
-                    "minutes_remaining": {
-                        "type": "integer"
-                    }
-                },
-                "required": ["effect", "minutes_remaining"],
-                "additionalProperties": False
-            }
-        },
+        "player": character_schema,
         "location": {
             "type": "string"
+        },
+        "danger": {
+            "type": "string",
+            "enum": ["safe", "low", "medium", "high", "very high"]
         },
         "time_of_day": {
             "type": "string"
@@ -271,7 +256,7 @@ game_state_schema = {
             "items": character_schema
         }
     },
-    "required": ["health", "gold", "AC", "inventory", "spell_slots", "spell_effects", "location", "time_of_day", "sunrise", "sunset", "date", "dark", "monsters", "NPCs"],
+    "required": ["player", "location", "danger", "time_of_day", "sunrise", "sunset", "date", "dark", "monsters", "NPCs"],
     "additionalProperties": False
 }
 
@@ -337,10 +322,12 @@ def make_structured_request(system_prompt: str, user_prompt: str, second_system_
     headers = {
         "Content-Type": "application/json",
         "api-key": api_key,
+        "Authorization": f"Bearer {api_key}"
     }
 
     # Payload for the request
     payload = {
+        "model": "gpt-4o-mini",
         "messages": [
             {
             "role": "system",
@@ -527,6 +514,18 @@ Casting a spell deducts a spell slot for that spell's level.
 Spellcasters may freely cast any cantrips that they know.  Cantrips do not consume spell slots.
 Spellcasters may not cast cantrips that they do not know.
 
+Wandering Encounters:
+Wandering monsters may appear whenever the player is in a dangerous area.  To perform a wandering encounter check, roll a d20.  The target value depends on how dangerous the area is:
+low: 20
+medium: 19
+high: 18
+very high: 17
+While traveling outside on the road, check once every six hours.  The encounter may be friendly (travelers) or hostile (bandits, wild animals, roving goblins, etc).  Hostile encounters are more likely
+if the player is far from a town or if the player is an area with known enemy activity.
+In the wilderness off the main road, check once every hour.  Encounters are generally hostile with area-appropriate wild animals being more common.
+In a "dungeon" area like a ruin or cave, check every hour and whenever the player enters a new area.  Encounters should be appropriate to the area.
+If the player attempts to sleep in the wilderness or a dungeon that has not been cleared, always check for wandering encounters.  If an encounter occurs, the player's sleep will be interrupted.
+
 Death:
 If the player's health reaches zero, they will be knocked out.  Unless there is an NPC or ally nearby who can
 help or unless somebody happens to find the player, they will die and the game will end.
@@ -545,11 +544,11 @@ from the player and should be specific about damage points, time taken, etc.
 state_change_rules = '''
 Examine the given action description and determine how the game state has changed, generating the new game state in JSON.  Only include the JSON response.
 
-Health: this is an integer value tracking the player's hit points, accourding to D&D 5th Edition.
-When the player takes damage, subtract the damage total from the player's hit points.  If hit points reaches 0 or lower the player will die.
-When the player is healed, increase hit points but only up to the player's maximum health.
+Player: this defines the player character and includes their current HP, according to D&D 5th Edition.  When the player takes damage, subtract the damage total from HP.  If HP reaches 0
+or lower the player will die.
+When the player is healed, increase HP but only up to the player's Max HP.
 
-Gold: this is an integer value tracking the number of gold pieces the player carries.
+The Player object also tracks Gold: this is an integer value tracking the number of gold pieces the player carries.
 When the player makes a purchase, subtract the purchase price from Gold.
 When the player sells an item, add the sale price to Gold.
 When the player finds money, add the amount to Gold.
@@ -563,6 +562,8 @@ When the player makes a purchase, add the purchased item to the inventory.  Do n
 When the player makes a sale, remove the sold item from the inventory.  Do not remove an item if the player is just bargaining.
 The player must explicitly accept a deal or specify a purchase before Inventory may change.
 Do not add the same item to the inventory more than once unless the player explicitly acquires multiple items.
+
+Danger: the danger field determines how dangerous the current area is, expressed as safe, low, medium, high, or very high.
 
 Examples:
 "The player purchases the amulet for 10 gold pieces" -> subtract 10 from gold and add the amulet to inventory
@@ -585,7 +586,7 @@ For example "Fierce Goblin" or "Sneaky Lizard".  Monsters should also have Healt
 The status indicator determines if the monster has some unusual status that might affect how it behaves in combat.
 
 Any NPCs in the room should be listed in the NPC section.
-NPCs have statistics very similar to those of a player character, and each NPC has a name.
+NPCs have statistics very similar to those of a player character, and each NPC has a name and pronouns.
 '''
 
 action_rules = '''
@@ -595,7 +596,8 @@ The player is about to execute their turn and there may be other characters and 
 Using the supplied characer sheet, game state, and the rules of the game, determine all the actions that will occur during this turn, outputting everything in JSON and only JSON.
 The first action will always be based on the command entered by the player.
 This will be followed by actions from any monsters and NPCs present.
-Finally any environmental actions will occur including sprung traps.
+Next any environmental actions will occur including sprung traps.
+Finally, if the player is not already in combat a wandering encounter check will be made if needed.
 For each action, first determine if a die roll is necessary.
 If a die roll is necessary, describe what rules
 to use and how to determine whether this action will succeed or fail using the die roll, expressed as the dice to roll (in a form like "3d20") and a number to beat.
@@ -823,7 +825,7 @@ def turn(command: str, debug: bool) -> str:
     # Perform the action
     if debug:
         print(success_message)
-    result = make_structured_request(game_rules + '\n' + json.dumps(player, indent=4) + json.dumps(game_state, indent=4) + response_rules, command, success_message, response_schema, 5000, context)
+    result = make_structured_request(game_rules + '\n' + json.dumps(game_state, indent=4) + '\n' + response_rules, command, success_message, response_schema, 5000, context)
     full_response = json.loads(result['message']['content'])
     player_response = full_response['player_response']
     DM_response = full_response['DM_response']

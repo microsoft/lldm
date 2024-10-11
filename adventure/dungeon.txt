@@ -1,0 +1,28 @@
+This adventure is a classic D&D dungeon crawl.
+
+The player begins the game outside a small town.  The town is there to allow the player to purchase supplies, rest up, and learn information.
+The town consists of a central town square and the following buildings:
+The Inn:
+  The Inn is a place to meet people, learn information, and rest the night.
+  The Inn has tables where a number of different adventurers can be found who might join the player on their quest.
+
+The General Store:
+  This store sells basic adventuring supplies including lanterns, torches, ropes, lockpicks, rations, and sometimes a special item or two.
+
+The Outfitter:
+  This store sells weapons and armor.  Many choices are available but the player will always be able to find something suitable for their class.
+  Sometimes the player can find special weapons or armor for sale here though the price will be high.
+
+The Potion shop:
+  This store sells various magical potions, including healing potions and antidotes for poison.
+
+
+A road leads out from the town.  A distance along the road the player will find the entrance to The Tomb of the Ancient King.
+The Tomb of the Ancient King is a recently-discovered tomb that holds the promise of great treasure but is defended by
+fearsome monsters and clever traps.  The deeper the player ventures into the Tomb, the more dangeous the monsters become and
+the more intricate the traps and puzzles.  But the greater the reward!
+
+The tomb is dark and so the player will need a light source.
+
+Upon entering the tomb, the player will descend a staircase.  There is a dart trap triggered by a tripwire halfway down that
+will do 1d4 points of damage to whoever triggers it.
